@@ -1,14 +1,16 @@
 const express = require("express");
 const cors = require("cors");
 const app = express();
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const morgan = require("morgan");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 
 // ? middlewares
 app.use(cors());
 app.use(express.json());
+app.use(morgan("dev"));
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@users.wit5elw.mongodb.net/?retryWrites=true&w=majority&appName=users`;
 
@@ -19,28 +21,140 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
-
+let gameReviewCollection;
+let watchListCollection;
 async function run() {
   try {
     await client.connect();
     const database = client.db(process.env.DB_NAME);
-    const usersCollection = database.collection("users");
-    const doc = {
-      name: "John Doe",
-      email: "gKp3e@example.com",
-    };
-    
+    gameReviewCollection = database.collection("gameReview");
+    watchListCollection = database.collection("watchList");
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
-  } finally {
-    await client.close();
+  } catch (error) {
+    console.log("error connecting to mongodb: ", error);
   }
 }
 run().catch(console.dir);
 
 app.get("/", (req, res) => {
-  res.send("Hello World!");
+  res.send("Server health is well.");
+});
+app.get("/reviews", async (req, res) => {
+  try {
+    const result = await gameReviewCollection.find().toArray();
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).send({ success: false, error: error.message });
+  }
+});
+app.get("/top-rated-games", async (req, res) => {
+  try {
+    const result = await gameReviewCollection
+      .find()
+      .sort({ rating: -1 })
+      .limit(6)
+      .toArray();
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).send({ success: false, error: error.message });
+  }
+});
+app.get("/my-reviews", async (req, res) => {
+  try {
+    const email = req.query.email;
+    const result = await gameReviewCollection.find({ email: email }).toArray();
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).send({ success: false, error: error.message });
+  }
+});
+app.get("/watchlist/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const result = await watchListCollection.find({ gameId: id }).toArray();
+
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).send({ success: false, error: error.message });
+  }
+});
+app.get("/watchlist", async (req, res) => {
+  try {
+    const email = req.query.email;
+
+    const result = await watchListCollection.find({ userId: email }).toArray();
+
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).send({ success: false, error: error.message });
+  }
+});
+app.put("/update-review/:id", async (req, res) => {
+  try {
+    const id = new ObjectId(req.params.id);
+
+    const review = req.body;
+
+    const filter = { _id: id };
+    const options = { upsert: true };
+    const updateDoc = {
+      $set: review,
+    };
+    const result = await gameReviewCollection.updateOne(
+      filter,
+      updateDoc,
+      options
+    );
+
+    res.status(202).json(result);
+  } catch (error) {
+    res.status(500).send({ success: false, error: error.message });
+  }
+});
+app.post("/add-review", async (req, res) => {
+  try {
+    const review = req.body;
+
+    const result = await gameReviewCollection.insertOne(review);
+    res.status(201).send({ success: true, insertedId: result.insertedId });
+  } catch (error) {
+    res.status(500).send({ success: false, error: error.message });
+  }
+});
+app.post("/add-to-watchlist", async (req, res) => {
+  try {
+    const review = req.body;
+
+    const result = await watchListCollection.insertOne(review);
+    res.status(201).send({ success: true, insertedId: result.insertedId });
+  } catch (error) {
+    res.status(500).send({ success: false, error: error.message });
+  }
+});
+app.delete("/delete-review/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const query = { _id: new ObjectId(id) };
+    const result = await gameReviewCollection.deleteOne(query);
+    res.status(204).send(result);
+  } catch (error) {
+    res.status(500).send({ success: false, error: error.message });
+  }
+});
+app.delete("/remove-from-watchlist/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const query = { gameId: id };
+    const result = await watchListCollection.deleteOne(query);
+    res.status(204).send(result);
+  } catch (error) {
+    res.status(500).send({ success: false, error: error.message });
+  }
 });
 
 app.listen(PORT, () => {
